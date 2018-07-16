@@ -11,6 +11,10 @@
 #   sudo apt install python3
 #   python3 -m pip install pyserial
 #
+# ---------------
+# Standard USB2TTL
+# ---------------
+#
 # Set permissions for '/dev/ttyUSBx' where 'x' is YOUR serial USB->serial adatper
 # => typically /dev/ttyUSB0 if you have only one adapter connected to your PC
 #
@@ -26,6 +30,26 @@
 # 3b. only for a specific adapter (here: 1a86:7523 QinHeng Electronics HL-340 USB-Serial adapter)
 #   ACTION=="add", KERNEL=="ttyUSB[0-9]*", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", MODE="0666"
 #
+# -------------
+# Raspberry Pi:
+# -------------
+#
+# If you connect the brake directly to Raspi's GPIO 14 and GPIO 15 do no forget to make the
+# UART accessable via /dev/ttyAMA0 by adding:
+#     enable_uart=1
+#     dtoverlay=pi3-disable-bt
+# to your /boot/config.txt. I recommend to first test the serial with a simple loopback test before
+# you connect the brake just to make sure the you talk to the serial via /dev/ttyAMA0.
+# Calling "./ttyT1941.py -d /dev/ttyAMA0" should print soemthing like 
+#   Using /dev/ttyAMA0
+#   bytearray(b'\x02\x00\x00\x00')
+#   bytearray(b'\x02\x00\x00\x00')
+#   ......
+#
+#
+# --------------
+# The Connection
+# --------------
 #
 # socket (female side) how you see it, when looking on the brake-power-back (same for head unit)
 #
@@ -49,12 +73,12 @@
 # !!! because the brake may not be 5V tolerant      !!!
 # !!!                                               !!!
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-# just wire USB/TTL-GND to RJ12-Pin 2 (black, GND), USB/TTL-Tx to RJ12-Pin 3 (Red, Host-Tx, Brake Rx) and USB/TTL-Rx to RJ12-Pin 6 (blue, Host-Rx, Brake Tx)
-
-# because I did not want to cut my original cable, I bought a new 6p6c RJ12 cable (1$) a CH341 USB to TTL adapter (1$).
+#
+# Just wire USB/TTL-GND to RJ12-Pin 2 (black, GND), USB/TTL-Tx to RJ12-Pin 3 (Red, Host-Tx, Brake Rx) and USB/TTL-Rx to RJ12-Pin 6 (blue, Host-Rx, Brake Tx).
+# On Raspi GND is Pin 6, Tx is Pin 8 and Rx is Pin 10. 
+#
+# Because I did not want to cut my original cable, I bought a new 6p6c RJ12 cable (1$) a CH341 USB to TTL adapter (1$).
 # You can solder the pins or connected 'Dupont' sockets to the cable (< 1$) if you have a crimp tool.
-
 #
 # The command- and answer-frames all look like: "4-bytes-header" | Message-Data | "2-bytes-checksum"
 # the length of the msg is coded in the second byte of the header (header[1])
