@@ -40,12 +40,11 @@
 #     dtoverlay=pi3-disable-bt
 # to your /boot/config.txt. I recommend to first test the serial with a simple loopback test before
 # you connect the brake just to make sure the you talk to the serial via /dev/ttyAMA0.
-# Calling "./ttyT1941.py -d /dev/ttyAMA0" should print soemthing like 
+# Calling "./ttyT1941.py -d /dev/ttyAMA0" (in loopback) should print something like 
 #   Using /dev/ttyAMA0
 #   bytearray(b'\x02\x00\x00\x00')
 #   bytearray(b'\x02\x00\x00\x00')
 #   ......
-#
 #
 # --------------
 # The Connection
@@ -80,9 +79,15 @@
 # Because I did not want to cut my original cable, I bought a new 6p6c RJ12 cable (1$) a CH341 USB to TTL adapter (1$).
 # You can solder the pins or connected 'Dupont' sockets to the cable (< 1$) if you have a crimp tool.
 #
+# From 'Makeblock' there is a cable with a RJ12/RJ25 (6p6c) socket on one side an Dupont sockets on the other side. 
+# Price is about 2$-3$ for a bundle with two cables. 
+# The cable is only 20cm long, but with a full connected female-female 6p6c adapter, you can use the original 
+# cable in addition. The Makeblock part no. is MB14230. They even use the same wire colors as the original cable. 
+
+#
 # The command- and answer-frames all look like: "4-bytes-header" | Message-Data | "2-bytes-checksum"
 # the length of the msg is coded in the second byte of the header (header[1])
-# Before sending to the serial line, the whole frame is converted into 'readable' Hex-Values (ascii 0-8,A-F).
+# Before sending to the serial line, the whole frame is converted into 'readable' Hex-Values (ascii 0-9,A-F).
 #
 # Motorbrake "version" command: (cmd=0x02, no message date)
 # 02 00 00 00
@@ -125,6 +130,19 @@
 # 01
 #    => the middle part and the checksum can vary
 #     T1941[6+2] : ff 02 14 00 ce ff [48 4d]    -> little endian is 02FF, 0014, FFCE [cksm]
+#
+# Command Modes
+#  Off-Mode
+#     mode="0"  LOAD=0, weight = 0x52, calibrate does not matter
+#
+#  Ergo-Mode: you give target power, brake controls resistance
+#     mode="2"  LOAD ~= targetPower (in watts) * 13, weight = 0x0a, calibrate as necessary (0x410 = 8*130 is default)
+#
+#  Slope-Mode: you give the "slope", brake simulates a force (power = force * distance)
+#     mode="2"  LOAD ~= (slope (in %) - 0.4) * 650, weight = total weight of rider and bike, calibrate as necessary (0x410 = 8*130 is default)
+#
+#  "3" Calibrate Mode: you give a speed, the brake turns the wheel and measures the power -> calibration depends on the necessary power to turn the wheel
+#     LOAD = speed(in kmh) * 290, weight = 0x52, calibrate=0
 
 
 import serial, glob
@@ -169,18 +187,18 @@ def hex2bin(b):
 
 # checksum1() is checksum() with "pre-decoded" '0x01' start-of-frame byte (based on shiftreg 0x0000)
 def checksum1(buffer):
-    shiftreg = 0xc0c1;
-    # shiftreg = 0x0000;
-    poly = 0xc001;
+    shiftreg = 0xc0c1
+    # shiftreg = 0x0000
+    poly = 0xc001
     for a in buffer:
-        tmp = a ^ (shiftreg & 0xff);
-        shiftreg >>= 8;
+        tmp = a ^ (shiftreg & 0xff)
+        shiftreg >>= 8
 
         if parity16(tmp):
-            shiftreg ^= poly;
+            shiftreg ^= poly
 
         tmp ^= tmp<<1
-        shiftreg ^= tmp << 6;
+        shiftreg ^= tmp << 6
 
     return shiftreg
 
@@ -248,23 +266,43 @@ def main():
     # weight=0x0a switchs to ERGO mode.
     mode      = 0x02
     weight    = 0x0a
-    watt      = 10.0
+
+    selectedWatt     = 10.0
+    selectedSlope    =  0.0
+    selectedSpeed    = 20.0  # calibrate mode with 20 kph
+
+    slopeOffset      = -0.4
+    slopeScale       = 650   # 13 * 5 * 10
+    speedScale       = 290
 
     #triggerErrorCMD = bytes([0x01])
 
     waitForSerial = True
+    cadSensor = 0
 
     while True:
 
         if waitForSerial:
             versionCMD  = bytes([0x02,0x00,0x00,0x00])
             port.write(marshal(versionCMD))
-        else:
-            load     = int( watt * 13 )
-            runCMD   = bytes([0x01,0x08,0x01,0x00, load & 0xff, load >> 8, 0x00, 0x00, mode, weight, calibrate & 0xff, calibrate >> 8 ])
+        elif mode == 2 and weight == 0x0a:
+            load     = int( selectedWatt * 13 )
+            cadecho  = cadSensor & 0x1
+            runCMD   = bytes([0x01,0x08,0x01,0x00, load & 0xff, load >> 8, cadecho, 0x00, mode, weight, calibrate & 0xff, calibrate >> 8 ])
+            port.write(marshal(runCMD))
+        elif mode == 2 and weight != 0x0a:
+            load     = int( (selectedSlope + slopeOffset)*slopeScale )
+            cadecho  = cadSensor & 0x1
+            runCMD   = bytes([0x01,0x08,0x01,0x00, load & 0xff, load >> 8, cadecho, 0x00, mode, weight, calibrate & 0xff, calibrate >> 8 ])
+            port.write(marshal(runCMD))
+        elif mode == 3:
+            load     = int( selectedSpeed / speedScale )
+            # probably cadsensor, weight, and calibrate does not matter
+            cadecho  = cadSensor & 0x1
+            runCMD   = bytes([0x01,0x08,0x01,0x00, load & 0xff, load >> 8, cadecho, 0x00, mode, 0x52, 0, 0 ])
             port.write(marshal(runCMD))
 
-        answerRaw = port.read(64)
+        answerRaw     = port.read(64)
         answerDecoded = unmarshal(answerRaw)
 
         #print(answerRaw)
@@ -275,12 +313,14 @@ def main():
             wheel       = answerDecoded[32-24] | (answerDecoded[33-24]<<8)
             speed       = 128 * wheel / (10 * 3600)
             cadence     = answerDecoded[44-24]
-            cadSensor   = answerDecoded[46-24]
+            cadSensor   = answerDecoded[42-24]
             distance    = answerDecoded[28-24] | (answerDecoded[29-24]<<8) | (answerDecoded[30-24]<<16) | (answerDecoded[31-24]<<24);
             currentLoad = answerDecoded[38-24] | (answerDecoded[39-24]<<8)
             desiredLoad = answerDecoded[40-24] | (answerDecoded[41-24]<<8)
 
-            print('Distance={:5d}, Wheel={:4d}, Speed={:4.1f}, Cad={:3d}, CadSensor={:1d}, LoadCurrent={:5d}, LoadDesired={:5d}, WattCurrent={:5.1f} WattDesired={:5.1f}'.format(distance, wheel, speed, cadence, cadSensor, currentLoad, desiredLoad, currentLoad/13, watt ))
+            speed       = wheel / speedScale
+
+            print('Distance={:5d}, Wheel={:4d}, Speed={:4.1f}, Cad={:3d}, CadSensor={:1d}, LoadCurrent={:5d}, LoadDesired={:5d}, WattCurrent={:5.1f} WattDesired={:5.1f}'.format(distance, wheel, speed, cadence, cadSensor, currentLoad, desiredLoad, currentLoad/13, selectedWatt ))
         elif len(answerDecoded) >= 16 and answerDecoded[24-24] == 0x03 and answerDecoded[25-24] == 12 and answerDecoded[26-24] == 0 and answerDecoded[27-24] == 0:
             serialNr    = answerDecoded[32-24] | (answerDecoded[33-24] << 8) | (answerDecoded[34-24] << 16) | (answerDecoded[35-24] << 24);
             print('firmwareVersion={:02x}.{:02x}.{:02x}.{:02x}, Serial={:10d}, Unknown={:02x}.{:02x}.{:02x}.{:02x}'.format(
@@ -292,7 +332,7 @@ def main():
             print(answerDecoded)
 
         # Test: Increase 1 watt every second
-        watt += 0.5
+        selectedWatt += 0.5
         time.sleep(0.5)
 
 
