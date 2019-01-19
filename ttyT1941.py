@@ -34,10 +34,14 @@
 # Raspberry Pi:
 # -------------
 #
-# If you connect the brake directly to Raspi's GPIO 14 and GPIO 15 do no forget to make the
-# UART accessable via /dev/ttyAMA0 by adding:
+# If you connect the brake directly to Raspi's GPIO 14 and GPIO 15 (that is Pin 8 (Tx) and Pin 10 (Rx)) 
+# do no forget to make the UART accessable via /dev/ttyAMA0 by adding:
 #     enable_uart=1
+#
+# on Raspi 3 B (or B+) or Raspi Zero W use /dev/ttyS0 (!!) or switch of on-board Bluetooth via
 #     dtoverlay=pi3-disable-bt
+# to enable the UART under /dev/ttyAMA0
+#
 # to your /boot/config.txt. I recommend to first test the serial with a simple loopback test before
 # you connect the brake just to make sure the you talk to the serial via /dev/ttyAMA0.
 # Calling "./ttyT1941.py -d /dev/ttyAMA0" (in loopback) should print something like 
@@ -150,6 +154,7 @@ import time
 import argparse
 
 
+
 startOfFrame = 0x01
 endOfFrame   = 0x17
 
@@ -253,54 +258,99 @@ def unmarshal(buffer):
 def main():
     parser = argparse.ArgumentParser(description='Demonstrator to show the serial communication betwenn a host and the Tacx T1941 motor brake')
     parser.add_argument('-d','--device', help='The serial device to use for communication.', required=False, default="/dev/ttyUSB0")
+    
+    parser.add_argument('-c','--calibrate', help='Switch to calibration mode', action='store_true', default=False)
+    #parser.add_argument('-e','--ergo',      help='Switch to ergo (Power) mode', action='store_true', default=True)
+    parser.add_argument('-s','--slope',     help='Switch to simulation (Slope) mode', action='store_true', default=False)
     args = parser.parse_args()
 
     if len(glob.glob('/dev/ttyUSB*')) > 1:
         print("INFO: Multiple /dev/ttyUSB device found.")
-    print("Using "+args.device)
+    print("Using "+args.device+" \n")
+
+    if args.calibrate and args.slope:
+        print("'Calibrate'- and 'Slope'-mode mutually exclude each other." )
+        exit(1)        
 
     port = serial.Serial(args.device, baudrate=19200, timeout=0.1)
-
-    calibrate = 0x0410
-    # mode=2 => brake active
-    # weight=0x0a switchs to ERGO mode.
-    mode      = 0x02
-    weight    = 0x0a
-
-    selectedWatt     = 10.0
+        
+    selectedWatt     = 150.0
     selectedSlope    =  0.0
-    selectedSpeed    = 20.0  # calibrate mode with 20 kph
+    selectedSpeed    = 20.0  # calibrate mode with 20 km/h
+
+    weight_ergo = 0x0a             # weight=0x0a together with mode=2 switchs to ERGO mode.
+    weight_slope_default = 0x52    # total weight (rider+bike) for simulation/slope mode
 
     slopeOffset      = -0.4
-    slopeScale       = 650   # 13 * 5 * 10
-    speedScale       = 290
+    slopeScale       = 5*130   # 13 * 5 * 10 = 650
+    speedScale       = 289.75  # convert km/h to "raw_speed"
 
-    #triggerErrorCMD = bytes([0x01])
+    scale_calibrate = 130
+    calibrate_value =  0.0         # calibrate_value range -8.0 ... 8.0
+    calibrate = int(scale_calibrate * (calibrate_value + 8.0)) # default x0410 = 8*130 = 1040 
+
+    # The 'magic' scale factor: Raw_Load = Target_Power * 128866 / Raw_Speed
+    power2load_magic   = 128866 
 
     waitForSerial = True
     cadSensor = 0
+    wheel = 0
+    mode = 0
+    calibrate_timer = 0
 
     while True:
 
+        nextCMD = None
+
         if waitForSerial:
-            versionCMD  = bytes([0x02,0x00,0x00,0x00])
-            port.write(marshal(versionCMD))
-        elif mode == 2 and weight == 0x0a:
-            load     = int( selectedWatt * 13 )
-            cadecho  = cadSensor & 0x1
-            runCMD   = bytes([0x01,0x08,0x01,0x00, load & 0xff, load >> 8, cadecho, 0x00, mode, weight, calibrate & 0xff, calibrate >> 8 ])
-            port.write(marshal(runCMD))
-        elif mode == 2 and weight != 0x0a:
+            #triggerErrorCMD = bytes([0x01])
+            nextCMD  = bytes([0x02,0x00,0x00,0x00])
+
+        elif args.calibrate:
+            if calibrate_timer == 0 and mode == 0:
+                print(
+                    "\u001b[31;1mWatch out: Brake accelerates the wheel to 20 km/h.\n\n"
+                    "\u001b[33;1mThe calibration process runs for about 50 seconds to warm up the\n"
+                    "wheel and the brake. Rerun calibration if values are not stable at the end.\u001b[0m\n\n"
+                    "\u001b[31;1mIf - for some reason - the program crashes while calibrating, the brake\n"
+                    "continues wheeling. Start the programm again in non-calibrating mode to stop.\u001b[0m\n\n"
+                    "\u001b[33;1mNow turn the wheel with at least 5 km/h to start the\ncalibration (then stop pedalling).\u001b[0m\n\n"
+                    )
+
+            mode = 3
+            load     = int( selectedSpeed * speedScale )
+
+            if wheel > 10*speedScale or calibrate_timer > 0:
+                calibrate_timer += 1
+
+            if calibrate_timer == 100:
+                mode = 0
+                load = 0
+                print("Stopping brake")
+
+            if calibrate_timer > 100 and wheel == 0:
+                exit(1)
+
+            nextCMD   = bytes([0x01,0x08,0x01,0x00, load & 0xff, load >> 8, 0, 0x00, mode, 0x52, 0, 0 ])
+
+        elif args.slope:
             load     = int( (selectedSlope + slopeOffset)*slopeScale )
             cadecho  = cadSensor & 0x1
-            runCMD   = bytes([0x01,0x08,0x01,0x00, load & 0xff, load >> 8, cadecho, 0x00, mode, weight, calibrate & 0xff, calibrate >> 8 ])
-            port.write(marshal(runCMD))
-        elif mode == 3:
-            load     = int( selectedSpeed / speedScale )
-            # probably cadsensor, weight, and calibrate does not matter
+            mode = 2
+            weight = weight_slope_default
+            nextCMD   = bytes([0x01,0x08,0x01,0x00, load & 0xff, load >> 8, cadecho, 0x00, mode, weight, calibrate & 0xff, calibrate >> 8 ])
+
+        else:
+            load = 0
+            if wheel > 0:
+                load     = int(selectedWatt * power2load_magic / wheel)
             cadecho  = cadSensor & 0x1
-            runCMD   = bytes([0x01,0x08,0x01,0x00, load & 0xff, load >> 8, cadecho, 0x00, mode, 0x52, 0, 0 ])
-            port.write(marshal(runCMD))
+            mode = 2
+            weight = weight_ergo
+            nextCMD   = bytes([0x01,0x08,0x01,0x00, load & 0xff, load >> 8, cadecho, 0x00, mode, weight, calibrate & 0xff, calibrate >> 8 ])
+
+        if nextCMD:
+            port.write(marshal(nextCMD))
 
         answerRaw     = port.read(64)
         answerDecoded = unmarshal(answerRaw)
@@ -310,29 +360,57 @@ def main():
         #print("D:"+' '.join(format(x, '02x') for x in answerDecoded))
 
         if len(answerDecoded) >= 23 and answerDecoded[24-24] == 0x03 and answerDecoded[25-24] == 19 and answerDecoded[26-24] == 2 and answerDecoded[27-24] == 0:
-            wheel       = answerDecoded[32-24] | (answerDecoded[33-24]<<8)
-            speed       = 128 * wheel / (10 * 3600)
-            cadence     = answerDecoded[44-24]
-            cadSensor   = answerDecoded[42-24]
-            distance    = answerDecoded[28-24] | (answerDecoded[29-24]<<8) | (answerDecoded[30-24]<<16) | (answerDecoded[31-24]<<24);
-            currentLoad = answerDecoded[38-24] | (answerDecoded[39-24]<<8)
-            desiredLoad = answerDecoded[40-24] | (answerDecoded[41-24]<<8)
+            wheel                   = answerDecoded[32-24] | (answerDecoded[33-24]<<8)
+            cadence                 = answerDecoded[44-24]
+            cadSensor               = answerDecoded[42-24]
+            distance                = answerDecoded[28-24] | (answerDecoded[29-24]<<8) | (answerDecoded[30-24]<<16) | (answerDecoded[31-24]<<24)
+            unknown34_35            = answerDecoded[34-24] | (answerDecoded[35-24]<<8)
+            currentResistance       = answerDecoded[38-24] | (answerDecoded[39-24]<<8)
+            currentResistanceAvg    = answerDecoded[36-24] | (answerDecoded[37-24]<<8)
+            desiredLoad             = answerDecoded[40-24] | (answerDecoded[41-24]<<8)
 
             speed       = wheel / speedScale
 
-            print('Distance={:5d}, Wheel={:4d}, Speed={:4.1f}, Cad={:3d}, CadSensor={:1d}, LoadCurrent={:5d}, LoadDesired={:5d}, WattCurrent={:5.1f} WattDesired={:5.1f}'.format(distance, wheel, speed, cadence, cadSensor, currentLoad, desiredLoad, currentLoad/13, selectedWatt ))
+            if mode == 3:
+                useCalibration = 65536-currentResistance
+                if speed >= 19.8 and speed < 20.3:
+                    print('    Calibrate: Wheel={:4d}, Speed={:4.1f} Resistance={:5d}: CalibrateTo={:5d} =0x{:04x}'.format(
+                        wheel, speed, currentResistance, useCalibration, useCalibration))
+                elif speed > 3:
+                    print('    Calibrate: Wheel={:4d}, Speed={:4.1f} Resistance={:5d}: CalibrateTo={:5d} =0x{:04x} \u001b[31;1m[Speed not between 19.8 and 20.2]\u001b[0m'.format(
+                        wheel, speed, currentResistance, useCalibration, useCalibration))
+                    
+            else:
+                currentWatt = 0
+                currentWattAvg = 0
+                if wheel > 0:
+                    currentWatt = int(currentResistance * wheel / power2load_magic)
+                    currentWattAvg = int(currentResistanceAvg * wheel / power2load_magic)
+                print('DST={:5d}, '
+                      'PWR=\u001b[31;1m{:4d}\u001b[0m, PWRAvg={:4d}, '
+                      'Wheel={:4d}, SPD=\u001b[33;1m{:4.1f}\u001b[0m, '
+                      'CAD=\u001b[32;1m{:3d}\u001b[0m, CadSensor={:1d}, '
+                      'U3435={:5d} ForceAvg={:5d}, Force={:5d}, '
+                      'LoadEcho={:5d} Load={:5d}'.format(
+                    distance, currentWatt, currentWattAvg, wheel, speed, cadence, cadSensor, unknown34_35, currentResistanceAvg, currentResistance, desiredLoad, load ))
+
         elif len(answerDecoded) >= 16 and answerDecoded[24-24] == 0x03 and answerDecoded[25-24] == 12 and answerDecoded[26-24] == 0 and answerDecoded[27-24] == 0:
-            serialNr    = answerDecoded[32-24] | (answerDecoded[33-24] << 8) | (answerDecoded[34-24] << 16) | (answerDecoded[35-24] << 24);
-            print('firmwareVersion={:02x}.{:02x}.{:02x}.{:02x}, Serial={:10d}, Unknown={:02x}.{:02x}.{:02x}.{:02x}'.format(
+            serialNr    = answerDecoded[32-24] | (answerDecoded[33-24] << 8) | (answerDecoded[34-24] << 16) | (answerDecoded[35-24] << 24)
+            year        = serialNr // 100000 % 100
+            serialSmall = serialNr  % 100000
+            deviceNo    = serialNr // 10000000
+            print("\u001b[32;1mPowerback\n"
+                    "  firmwareVersion= {:02x}.{:02x}.{:02x}.{:02x}\n"
+                    "  serial= {:d} (Tacx T19{:02d} Year 20{:02d} #{:05d})\n"
+                    "  Date= {:02x}.{:02x} Unknown= {:02x}.{:02x}\u001b[0m\n".format(
                 answerDecoded[31-24],answerDecoded[30-24],answerDecoded[29-24],answerDecoded[28-24],
-                serialNr,
-                answerDecoded[39-24],answerDecoded[38-24],answerDecoded[37-24],answerDecoded[36-24]))
+                serialNr, deviceNo, year, serialSmall,
+                answerDecoded[37-24],answerDecoded[36-24],
+                answerDecoded[39-24],answerDecoded[38-24]))
             waitForSerial = False
         else:
             print(answerDecoded)
 
-        # Test: Increase 1 watt every second
-        selectedWatt += 0.5
         time.sleep(0.5)
 
 
