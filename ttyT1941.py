@@ -38,9 +38,13 @@
 # do no forget to make the UART accessable via /dev/ttyAMA0 by adding:
 #     enable_uart=1
 #
-# on Raspi 3 B (or B+) or Raspi Zero W use /dev/ttyS0 (!!) or switch of on-board Bluetooth via
+# on Raspi 3 B (or B+) or Raspi Zero W use /dev/ttyS0 (not /dev/ttyUSB0). Be warned: the Mini-UART on the
+# Raspi W Zero is limited and the error rate increase with a high command rate. 
+# So, if you do not need on-board Bluetooth switch it off with
 #     dtoverlay=pi3-disable-bt
-# to enable the UART under /dev/ttyAMA0
+# to enable the standard UART under /dev/ttyAMA0. 
+# If you need Bluetooth on the Raspi, I recommend to use an additional USB2TTL adapter instead of the
+# Mini-UART.
 #
 # to your /boot/config.txt. I recommend to first test the serial with a simple loopback test before
 # you connect the brake just to make sure the you talk to the serial via /dev/ttyAMA0.
