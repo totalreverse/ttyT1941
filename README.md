@@ -52,8 +52,8 @@ It is **HIGHLY** recommend to use 3.3V TTL logic, because the brake may not be 5
 
 </pre>
 
-![CH341 USB2TTL with Makeblock MB14230](pic/ch341.jpeg|width=80)
-![Raspi W Zero with Makeblock MB14230](pic/raspi.jpeg|width=80)
+<img src="pic/ch341.jpeg" alt="CH341 USB2TTL with Makeblock MB14230" width="80%"/>
+<img src="pic/raspi.jpeg" alt="Raspi W Zero with Makeblock MB14230" width="80%"/>
 
 # Protocol
 
