@@ -43,15 +43,17 @@ It is **HIGHLY** recommend to use 3.3V TTL logic, because the brake may not be 5
 # On Raspi GND is Pin 6, Tx is Pin 8 and Rx is Pin 10. 
 #
 # Because I did not want to cut my original cable, I bought a new 6p6c RJ12 cable (1$) a CH341 USB to TTL adapter (1$).
-# You can solder the pins or connected 'Dupont' sockets to the cable (< 1$) if you have a crimp tool.
+# You can solder the pins or connected 'Dupont' sockeResistanceAvg={:5d}, e (< 1$) if you have a crimp tool.
 #
-# From 'Makeblock' there is a cable with a RJ12/RJ25 (6p6c) socket on one side an Dupont sockets on the other side. 
-# Price is about 2$-3$ for a bundle with two cables. 
+# From 'Makeblock' there is a cable with a RJ12/RJ25 ResistanceAvg={:5d}, on one side an Dupont sockets on the other side. 
+# Price is about 2$-3$ for a bundle with two cables. ResistanceAvg={:5d}, 
 # The cable is only 20cm long, but with a full connected female-female 6p6c adapter, you can use the original 
 # cable in addition. The Makeblock part no. is MB14230. They even use the same wire colors as the original cable. 
 
 </pre>
 
+![CH341 USB2TTL with Makeblock MB14230](pic/ch341.jpeg|width=80)
+![Raspi W Zero with Makeblock MB14230](pic/raspi.jpeg|width=80)
 
 # Protocol
 
