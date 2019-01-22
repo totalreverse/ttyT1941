@@ -162,6 +162,9 @@ from datetime import datetime, time, timedelta
 startOfFrame = 0x01
 endOfFrame   = 0x17
 
+class HexValueError(Exception):
+    pass
+
 # bithack: parity
 def parity16(b):
     b ^= b >> 8
@@ -188,11 +191,11 @@ def hex2bin(b):
     elif b >= 0x61 and b <= 0x66:
         # 'a'..'f'
         return b + 10 - 0x61
-    # Fallback to handle case with wrong initialized brake
+    # "special" fallback to handle case with wrong initialized brake
     elif b == 0x0:
         return 0
-    else:
-        raise NameError("only Ascii Hex chars allowed")
+
+    raise HexValueError("only Ascii Hex chars allowed")
 
 # checksum1() is checksum() with "pre-decoded" '0x01' start-of-frame byte (based on shiftreg 0x0000)
 def checksum1(buffer):
@@ -243,18 +246,26 @@ def unmarshal(buffer):
 
     chk = checksum1(buffer[1:-5])
 
-    chkBuf  = hex2bin(buffer[-5])<<4
-    chkBuf += hex2bin(buffer[-4])<<0
-    chkBuf += hex2bin(buffer[-3])<<12
-    chkBuf += hex2bin(buffer[-2])<<8
+    try:
+        chkBuf  = hex2bin(buffer[-5])<<4
+        chkBuf += hex2bin(buffer[-4])<<0
+        chkBuf += hex2bin(buffer[-3])<<12
+        chkBuf += hex2bin(buffer[-2])<<8
 
-    #print('checksum  calc:{:4x} and buf:{:4x}'.format(chk, chkBuf))
-    if chk != chkBuf:
-        print('checksum error {:4x} != {:4x}'.format(chk, chkBuf))
-        return buf
+        #print('checksum  calc:{:4x} and buf:{:4x}'.format(chk, chkBuf))
+        if chk != chkBuf:
+            print('checksum error {:4x} != {:4x}'.format(chk, chkBuf))
+            return buf
 
-    for i in range(1,len(buffer)-5,2):
-        buf.append( (hex2bin(buffer[i])<<4)+hex2bin(buffer[i+1]) )
+        for i in range(1,len(buffer)-5,2):
+            buf.append( (hex2bin(buffer[i])<<4)+hex2bin(buffer[i+1]) )
+
+    except HexValueError:
+        # typically caused by a transfer error of received data - probably 
+        # in the 4 byte checksum. The other case (a corrupted frame with
+        # a valid checksum) is unlikely (but can happen, too)
+        return bytearray()
+
     return buf
 
 
@@ -277,6 +288,7 @@ def main():
         exit(1)        
 
     port = serial.Serial(args.device, baudrate=19200, timeout=0.1)
+    port.read_all()   # just in case - to delete remaining data in input buffers
         
     selectedWatt     = 150.0
     selectedSlope    =  0.0
@@ -307,8 +319,9 @@ def main():
 
     # Standard brake commands have 30 symbols and standard brake 
     # answers have 52 symbols. One symbol needs 10 bits (with 8N1) 
-    # With 19200 baud, sending and receiving takes about 40ms. 
-    port.timeout = 0.050 
+    # With 19200 baud, sending and receiving takes about 40ms, but 
+    # with values less then 70ms, brake sometimes loses a frame
+    port.timeout = 0.070 
 
     try:
         while True:
@@ -332,9 +345,8 @@ def main():
                         "\u001b[33;1mBrake is 'armed' for calibration - now turn the wheel with at least 5 km/h to\n"
                         "start the calibration (then stop pedalling).\u001b[0m\n\n"
                         )
-
-                mode = 3
-                load     = int( selectedSpeed * speedScale )
+                    mode = 3
+                    load     = int( selectedSpeed * speedScale )
 
                 if wheel > 10*speedScale or calibrate_timer > 0:
                     calibrate_timer += 1
