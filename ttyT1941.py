@@ -275,6 +275,7 @@ def main():
     parser.add_argument('-d','--device', help='The serial device to use for communication.', required=False, default="/dev/ttyUSB0")
     
     parser.add_argument('-c','--calibrate', help='Switch to calibration mode', action='store_true', default=False)
+    parser.add_argument('-ct','--calibrateTime', help='duration of calibration run', required=False, default=50)
     #parser.add_argument('-e','--ergo',      help='Switch to ergo (Power) mode', action='store_true', default=True)
     parser.add_argument('-s','--slope',     help='Switch to simulation (Slope) mode', action='store_true', default=False)
     args = parser.parse_args()
@@ -298,7 +299,7 @@ def main():
     weight_slope_default = 0x52    # total weight (rider+bike) for simulation/slope mode
 
     slopeOffset      = -0.4
-    slopeScale       = 5*130   # 13 * 5 * 10 = 650
+    slopeScale       = 2*5*130   # 13 * 5 * 10 * 5 = 3250
     speedScale       = 289.75  # convert km/h to "raw_speed"
 
     scale_calibrate = 130
@@ -313,7 +314,7 @@ def main():
     wheel = 0
     mode = 0
     calibrate_timer = 0
-    calibrate_total = 50   # 50 seconds
+    calibrate_total = int(args.calibrateTime)   # default 50 seconds
 
     cmds_per_second = 5   # max is < 20 with 50ms timeout
 
@@ -363,8 +364,10 @@ def main():
 
             elif args.slope:
                 load     = int( (selectedSlope + slopeOffset)*slopeScale )
-                if load > 0x4000:
-                    load = 0x4000
+                if load > 32500:
+                    load = 32500
+                if load < -0x4000:
+                    load = -0x4000
                 if load < 0:
                     load += 0x10000
                 cadecho  = cadSensor & 0x1
